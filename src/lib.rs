@@ -2,6 +2,7 @@
 
 use std::{env::{current_exe, temp_dir}, ffi::OsStr, fs::File, io::{Cursor, Error, Read, Write}, marker::PhantomData, ops::AddAssign, path::PathBuf, process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, ExitStatus, Stdio}};
 
+use anyhow::Context;
 use flate2::read::GzDecoder;
 use rand::{distributions::Alphanumeric, Rng};
 use tokio::{sync::mpsc::{channel, Receiver, Sender}, task::JoinHandle};
@@ -387,6 +388,8 @@ impl FFmpeg {
             let output_path = Self::downloaded_ffmpeg_folder()?;
             std::fs::create_dir_all(&output_path)?;
             std::fs::write(output_path.join("ffmpeg"), binary)?;
+
+            Self::get_program()?.context("Failed to download FFmpeg")?;
 
             // SAFETY: we just don't care, this doesn't matter really
             let _ = progress_tx.send(FFmpegDownloadProgress::Finished).await;
