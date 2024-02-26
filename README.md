@@ -55,7 +55,7 @@ async fn main() -> anyhow::Result<()> {
 
 This crate includes several examples demonstrating different use cases:
 
-- `basic-usage.rs`: Shows the basic usage of using this library.
+- `basic_usage.rs`: Shows the basic usage of using this library.
 - `muxing_hardware_accelerated.rs`: Demonstrates muxing with hardware acceleration.
 - `muxing_multiple_output.rs`: Shows how to mux multiple outputs.
 - `override_ffmpeg_download_directory.rs`: Illustrates how to override the default FFmpeg download directory.
