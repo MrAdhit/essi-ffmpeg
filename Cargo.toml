@@ -1,7 +1,14 @@
 [package]
 name = "essi-ffmpeg"
+description = "An easy to use FFmpeg CLI wrapper"
+authors = ["Adhitya Rimba <adhityarimba@gmail.com>"]
+keywords = ["essi", "easy", "ffmpeg", "cli", "wrapper"]
+categories = ["multimedia"]
 version = "0.1.0"
 edition = "2021"
+repository = "https://github.com/MrAdhit/essi-ffmpeg"
+readme = "README.md"
+license-file = "LICENSE"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
