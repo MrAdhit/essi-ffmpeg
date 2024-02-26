@@ -6,6 +6,22 @@ use flate2::read::GzDecoder;
 use rand::{distributions::Alphanumeric, Rng};
 use tokio::{sync::mpsc::{channel, Receiver, Sender}, task::JoinHandle};
 
+/// https://github.com/eugeneware/ffmpeg-static/releases/tag/b6.0
+#[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+const FFMPEG_URL: &str = "https://github.com/eugeneware/ffmpeg-static/releases/download/b6.0/ffmpeg-win32-x64.gz";
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+const FFMPEG_URL: &str = "https://github.com/eugeneware/ffmpeg-static/releases/download/b6.0/ffmpeg-linux-x64.gz";
+
+#[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+const FFMPEG_URL: &str = "https://github.com/eugeneware/ffmpeg-static/releases/download/b6.0/ffmpeg-linux-arm64.gz";
+
+#[cfg(all(target_os = "macos", target_arch = "x86_64"))]
+const FFMPEG_URL: &str = "https://github.com/eugeneware/ffmpeg-static/releases/download/b6.0/ffmpeg-darwin-x64.gz";
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+const FFMPEG_URL: &str = "https://github.com/eugeneware/ffmpeg-static/releases/download/b6.0/ffmpeg-darwin-arm64.gz";
+
 pub struct FFmpegCommand {
     inner_child: Child
 }
@@ -319,7 +335,7 @@ impl FFmpeg {
     ///
     /// It is your responsibility for making sure that the download is succeed & finished!
     pub fn auto_download() -> impl std::future::Future<Output = anyhow::Result<Option<(JoinHandle<Result<(), anyhow::Error>>, Receiver<FFmpegDownloadProgress>)>>> {
-        FFmpeg::auto_download_with_url(download_url())
+        FFmpeg::auto_download_with_url(FFMPEG_URL)
     }
 
     /// Downloaded file must be compressed in GZIP archive that contains the single FFmpeg binary
@@ -380,24 +396,6 @@ impl FFmpeg {
 
         Ok(Some((handle, progress_rx)))
     }
-}
-
-/// https://github.com/eugeneware/ffmpeg-static/releases/tag/b6.0
-fn download_url() -> &'static str {
-    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
-    return "https://github.com/eugeneware/ffmpeg-static/releases/download/b6.0/ffmpeg-win32-x64.gz";
-
-    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-    return "https://github.com/eugeneware/ffmpeg-static/releases/download/b6.0/ffmpeg-linux-x64.gz";
-
-    #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
-    return "https://github.com/eugeneware/ffmpeg-static/releases/download/b6.0/ffmpeg-linux-arm64.gz";
-
-    #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
-    return "https://github.com/eugeneware/ffmpeg-static/releases/download/b6.0/ffmpeg-darwin-x64.gz";
-
-    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-    return "https://github.com/eugeneware/ffmpeg-static/releases/download/b6.0/ffmpeg-darwin-arm64.gz";
 }
 
 fn random_temp_file() -> PathBuf {
