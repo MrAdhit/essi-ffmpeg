@@ -1,6 +1,4 @@
-#![feature(type_changing_struct_update)]
-
-use std::{env::{current_exe, temp_dir}, ffi::OsStr, fs::File, io::{Cursor, Error, Read, Write}, marker::PhantomData, ops::AddAssign, path::PathBuf, process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, ExitStatus, Stdio}};
+use std::{env::{current_exe, temp_dir}, ffi::OsStr, fs::{File, OpenOptions}, io::{Cursor, Error, Read, Write}, marker::PhantomData, ops::AddAssign, path::PathBuf, process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, ExitStatus, Stdio}};
 
 use anyhow::Context;
 use flate2::read::GzDecoder;
@@ -92,7 +90,7 @@ pub struct FFmpegBuilder<M: Mode + ?Sized> {
 
 impl<A: Mode> FFmpegBuilder<A> {
     fn into<B: Mode>(self) -> FFmpegBuilder<B> {
-        FFmpegBuilder { marker: PhantomData, ..self }
+        FFmpegBuilder { marker: PhantomData, inner_command: self.inner_command, inner_args: self.inner_args, inserting_offset: self.inserting_offset }
     }
 }
 
@@ -154,7 +152,7 @@ impl FFmpegBuilder<Normal> {
     pub fn input(mut self, buffer: &[u8]) -> std::io::Result<FFmpegBuilder<IO>> {
         let path = random_temp_file();
 
-        let mut file = File::create_new(&path)?;
+        let mut file = OpenOptions::new().read(true).write(true).create_new(true).open(&path)?;
         file.write(buffer)?;
 
         self.inserting_offset = Some(self.inner_args.len());
@@ -167,7 +165,7 @@ impl FFmpegBuilder<Normal> {
     pub fn output(mut self, file: &mut Option<File>) -> std::io::Result<FFmpegBuilder<IO>> {
         let path = random_temp_file();
 
-        *file = Some(File::create_new(&path)?);
+        *file = Some(OpenOptions::new().read(true).write(true).create_new(true).open(&path)?);
 
         self.inserting_offset = Some(self.inner_args.len());
         
