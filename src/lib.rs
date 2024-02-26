@@ -4,6 +4,7 @@ use std::{env::{current_exe, temp_dir}, ffi::OsStr, fs::File, io::{Cursor, Error
 
 use anyhow::Context;
 use flate2::read::GzDecoder;
+use once_cell::sync::Lazy;
 use rand::{distributions::Alphanumeric, Rng};
 use tokio::{sync::mpsc::{channel, Receiver, Sender}, task::JoinHandle};
 
@@ -22,6 +23,8 @@ const FFMPEG_URL: &str = "https://github.com/eugeneware/ffmpeg-static/releases/d
 
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 const FFMPEG_URL: &str = "https://github.com/eugeneware/ffmpeg-static/releases/download/b6.0/ffmpeg-darwin-arm64.gz";
+
+static mut FFMPEG_DOWNLOAD_ROOT_DIR: Lazy<PathBuf> = Lazy::new(|| current_exe().expect("Can't get the current app path").parent().clone().expect("Can't get the current program folder.\nThis should never fail... I think").to_path_buf());
 
 pub struct FFmpegCommand {
     inner_child: Child
@@ -281,6 +284,16 @@ impl FFmpeg {
         }
     }
 
+    /// Override the download FFmpeg directory
+    ///
+    /// # Safety
+    /// This should be called before any other function is called, or there will be inconsistencies of the downloaded FFmpeg directory
+    pub fn override_downloaded_ffmpeg_path(path: PathBuf) -> anyhow::Result<()> {
+        // SAFETY: override the FFmpeg directory, this SHOULD be called before any of the stuff is called
+        unsafe { *FFMPEG_DOWNLOAD_ROOT_DIR = path  };
+        Ok(())
+    }
+
     /// Check if FFmpeg is exist in the current environment
     pub fn is_exist_in_env() -> bool {
         match Command::new("ffmpeg").spawn() {
@@ -297,11 +310,8 @@ impl FFmpeg {
 
     /// Downloaded FFmpeg folder
     pub fn downloaded_ffmpeg_folder() -> anyhow::Result<PathBuf> {
-        Ok(
-            current_exe()?
-                .parent().expect("Can't get the current program folder.\nThis should never fail... I think")
-                .join("ffmpeg")
-        )
+        // SAFETY: APP_DIR defaults to current_exe, which SHOULD be overidden before any of the stuff is called
+        unsafe { Ok(FFMPEG_DOWNLOAD_ROOT_DIR.join("ffmpeg")) }
     }
 
     /// Downloaded FFmpeg executable
