@@ -40,8 +40,9 @@ async fn main() -> anyhow::Result<()> {
 
     // Build and execute an FFmpeg command
     let mut ffmpeg = FFmpeg::new()
-        .input("input_file.flv").unwrap()
-        .output("output_file.mp4").unwrap()
+        .stderr(std::process::Stdio::inherit())
+        .input_with_file("input_file.flv".into()).done()
+        .output_as_file("output_file.mp4".into()).done()
         .start().unwrap();
 
     ffmpeg.wait().unwrap();
