@@ -387,7 +387,16 @@ impl FFmpeg {
 
             let output_path = Self::downloaded_ffmpeg_folder()?;
             std::fs::create_dir_all(&output_path)?;
-            std::fs::write(output_path.join("ffmpeg"), binary)?;
+
+            let ffmpeg_path = output_path.join("ffmpeg");
+            std::fs::write(&ffmpeg_path, binary)?;
+
+            #[cfg(all(target_family = "unix"))]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                
+                std::fs::set_permissions(ffmpeg_path, std::fs::Permissions::from_mode(0o755))?;
+            }
 
             Self::get_program()?.context("Failed to download FFmpeg")?;
 
