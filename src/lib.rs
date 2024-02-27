@@ -64,6 +64,21 @@ impl FFmpegCommand {
     pub fn stderr(&self) -> &Option<ChildStderr> {
         &self.inner_child.stderr
     }
+
+    /// Used for piping input or command to FFmpeg 
+    pub fn take_stdin(&mut self) -> Option<ChildStdin> {
+        self.inner_child.stdin.take()
+    }
+
+    /// Used for piping output from FFmpeg 
+    pub fn take_stdout(&mut self) -> Option<ChildStdout> {
+        self.inner_child.stdout.take()
+    }
+
+    /// Used for piping log from FFmpeg 
+    pub fn take_stderr(&mut self) -> Option<ChildStderr> {
+        self.inner_child.stderr.take()
+    }
 }
 
 impl Drop for FFmpegCommand {
