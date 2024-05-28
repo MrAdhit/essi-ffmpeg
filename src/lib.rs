@@ -1,10 +1,13 @@
-use std::{env::{current_exe, temp_dir}, ffi::OsStr, fs::{File, OpenOptions}, io::{Cursor, Error, Read, Write}, marker::PhantomData, ops::AddAssign, path::PathBuf, process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, ExitStatus, Stdio}};
+use std::{env::{current_exe, temp_dir}, ffi::OsStr, fs::{File, OpenOptions}, io::{Cursor, Read, Write}, marker::PhantomData, ops::AddAssign, path::PathBuf, process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, ExitStatus, Stdio}};
 
 use anyhow::Context;
 use flate2::read::GzDecoder;
 use once_cell::sync::Lazy;
+use pipe::{Pipe, Piped};
 use rand::{distributions::Alphanumeric, Rng};
 use tokio::{sync::mpsc::{channel, Receiver, Sender}, task::JoinHandle};
+
+pub mod pipe;
 
 /// https://github.com/eugeneware/ffmpeg-static/releases/tag/b6.0
 #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
@@ -24,8 +27,72 @@ const FFMPEG_URL: &str = "https://github.com/eugeneware/ffmpeg-static/releases/d
 
 static mut FFMPEG_DOWNLOAD_ROOT_DIR: Lazy<PathBuf> = Lazy::new(|| current_exe().expect("Can't get the current app path").parent().clone().expect("Can't get the current program folder.\nThis should never fail... I think").to_path_buf());
 
+#[derive(Debug)]
+pub enum FFmpegProgressStatus {
+    Continue,
+    End,
+}
+
+impl std::str::FromStr for FFmpegProgressStatus {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "continue" => Ok(Self::Continue),
+            "end" => Ok(Self::End),
+            _ => anyhow::bail!("Can't parse from {s:?}"),
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct FFmpegProgress
+{
+    pub frame: Option<usize>,
+    pub fps: Option<usize>,
+    pub bitrate: Option<f32>,
+    pub total_size: Option<usize>,
+    pub out_time_us: Option<usize>,
+    pub out_time_ms: Option<usize>,
+    pub dup_frames: Option<usize>,
+    pub drop_frames: Option<usize>,
+    pub speed: Option<f32>,
+    pub progress: Option<FFmpegProgressStatus>,
+}
+
+impl From<String> for FFmpegProgress {
+    fn from(progress: String) -> Self {
+        let ffmpeg_kv = progress.split('\n').map(|kv| kv.split_once('='));
+
+        let mut progress = FFmpegProgress::default();
+
+        for kv in ffmpeg_kv {
+            let Some((key, value)) = kv else { continue };
+
+            let key = key.trim();
+            let value = value.trim();
+
+            match key {
+                "frame" => progress.frame = value.parse::<usize>().ok(),
+                "fps" => progress.fps = value.parse::<usize>().ok(),
+                "bitrate" => progress.bitrate = value.split_once("kbits").map(|(v, _)| v.parse::<f32>().ok()).flatten(),
+                "total_size" => progress.total_size = value.parse::<usize>().ok(),
+                "out_time_us" => progress.out_time_us = value.parse::<usize>().ok(),
+                "out_time_ms" => progress.out_time_ms = value.parse::<usize>().ok(),
+                "dup_frames" => progress.dup_frames = value.parse::<usize>().ok(),
+                "drop_frames" => progress.drop_frames = value.parse::<usize>().ok(),
+                "speed" => progress.speed = value.split_once("x").map(|(v, _)| v.parse::<f32>().ok()).flatten(),
+                "progress" => progress.progress = value.parse::<FFmpegProgressStatus>().ok(),
+                _ => {  }
+            }
+        }
+
+        progress
+    }
+}
+
 pub struct FFmpegCommand {
-    inner_child: Child
+    inner_child: Child,
 }
 
 impl FFmpegCommand {
@@ -111,12 +178,46 @@ impl<A: Mode> FFmpegBuilder<A> {
 
 impl FFmpegBuilder<Normal> {
     /// Start a new FFmpeg child process
-    pub fn start(&mut self) -> Result<FFmpegCommand, Error> {
+    pub fn start(&mut self) -> anyhow::Result<FFmpegCommand> {
         self.inner_command.args(&self.inner_args);
 
         let inner_child = self.inner_command.spawn()?;
 
         Ok(FFmpegCommand { inner_child })
+    }
+
+    /// Start a new FFmpeg child process & listen to the progress
+    pub fn start_listen_progress(mut self, progress_rx: &mut Option<Receiver<FFmpegProgress>>) -> anyhow::Result<FFmpegCommand> {
+        let progress_pipe = Pipe::create_pipe()?;
+        self.inner_args.extend(["-progress".to_owned(), progress_pipe.path().display().to_string()]);
+
+        let (ffmpeg_progress_tx, ffmpeg_progress_rx) = channel(128);
+
+        *progress_rx = Some(ffmpeg_progress_rx);
+
+        std::thread::spawn(move || {
+            let mut listener = progress_pipe.listen().unwrap();
+
+            let mut has_ended = false;
+
+            while !has_ended {
+                let mut progress_string = String::new();
+
+                let mut buffer = [0u8; 1024];
+                let Ok(len) = listener.read(&mut buffer) else { continue };
+
+                progress_string.push_str(&String::from_utf8_lossy(&buffer[..len]).trim());
+
+                if progress_string.ends_with("end") { has_ended = true };
+
+                let ffmpeg_progress = FFmpegProgress::from(progress_string);
+
+                let ffmpeg_progress_tx = ffmpeg_progress_tx.clone();
+                std::thread::spawn(move || ffmpeg_progress_tx.blocking_send(ffmpeg_progress).unwrap());
+            }
+        });
+
+        self.start()
     }
 
     /// Inspect FFmpeg arguments
@@ -146,6 +247,26 @@ impl FFmpegBuilder<Normal> {
         self.inner_command.stderr(cfg);
 
         self
+    }
+
+    pub fn input_with_pipe(mut self, pipe: &mut Option<Pipe>) -> anyhow::Result<FFmpegBuilder<IO>> {
+        self.inserting_offset = Some(self.inner_args.len());
+        
+        *pipe = Some(Pipe::create_pipe()?);
+
+        self.inner_args.extend(["-i".to_string(), pipe.as_ref().unwrap().path().display().to_string()]);
+
+        Ok(self.into())
+    }
+    
+    pub fn output_with_pipe(mut self, pipe: &mut Option<Pipe>) -> anyhow::Result<FFmpegBuilder<IO>> {
+        self.inserting_offset = Some(self.inner_args.len());
+        
+        *pipe = Some(Pipe::create_pipe()?);
+
+        self.inner_args.extend(["-y".to_string(), pipe.as_ref().unwrap().path().display().to_string()]);
+
+        Ok(self.into())
     }
 
     pub fn input_with_file(mut self, path: PathBuf) -> FFmpegBuilder<IO> {
@@ -433,12 +554,16 @@ impl FFmpeg {
     }
 }
 
-fn random_temp_file() -> PathBuf {
-    let name: String = rand::thread_rng()
+pub(crate) fn random_string() -> String {
+    rand::thread_rng()
         .sample_iter(&Alphanumeric)
         .take(10)
         .map(char::from)
-        .collect();
+        .collect()
+}
+
+pub(crate) fn random_temp_file() -> PathBuf {
+    let name: String = random_string();
 
     temp_dir().join(name)
 }
